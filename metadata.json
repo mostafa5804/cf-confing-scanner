@@ -1,0 +1,5 @@
+{
+  "name": "CF Config Scanner",
+  "description": "A web-based Cloudflare config scanner and clean IP finder.",
+  "requestFramePermissions": []
+}
