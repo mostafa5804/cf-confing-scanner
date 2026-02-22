@@ -1,9 +1,6 @@
 import { useState, useEffect } from "react";
-import { io } from "socket.io-client";
 import { Play, StopCircle, Download, Copy, ShieldCheck } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
-
-const socket = io();
 
 interface CleanIP {
   ip: string;
@@ -20,31 +17,36 @@ export default function CleanIPScanner() {
   const [mode, setMode] = useState<"quick" | "normal" | "full">("quick");
 
   useEffect(() => {
-    socket.on(`clean-ip-found-${scanId}`, (data: CleanIP) => {
+    if (!scanId || !scanning) return;
+
+    const eventSource = new EventSource(`/api/events/${scanId}`);
+
+    eventSource.addEventListener(`clean-ip-found-${scanId}`, (e: any) => {
+      const data = JSON.parse(e.data);
       setIps((prev) => [...prev, data].sort((a, b) => a.latency - b.latency));
     });
 
-    socket.on(`clean-scan-progress-${scanId}`, (data: { processed: number; total: number }) => {
+    eventSource.addEventListener(`clean-scan-progress-${scanId}`, (e: any) => {
+      const data = JSON.parse(e.data);
       setProcessed(data.processed);
       setTotal(data.total);
     });
 
-    socket.on(`clean-scan-start-${scanId}`, (data: { total: number }) => {
+    eventSource.addEventListener(`clean-scan-start-${scanId}`, (e: any) => {
+      const data = JSON.parse(e.data);
       setTotal(data.total);
       setProcessed(0);
     });
 
-    socket.on(`scan-complete-${scanId}`, () => {
+    eventSource.addEventListener(`scan-complete-${scanId}`, () => {
       setScanning(false);
+      eventSource.close();
     });
 
     return () => {
-      socket.off(`clean-ip-found-${scanId}`);
-      socket.off(`clean-scan-progress-${scanId}`);
-      socket.off(`clean-scan-start-${scanId}`);
-      socket.off(`scan-complete-${scanId}`);
+      eventSource.close();
     };
-  }, [scanId]);
+  }, [scanId, scanning]);
 
   const startScan = async () => {
     setIps([]);

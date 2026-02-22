@@ -1,10 +1,7 @@
 import { useState, useEffect } from "react";
-import { io } from "socket.io-client";
 import { Play, StopCircle, Upload, Link, FileText, Download, Copy, ArrowUpDown, ArrowUp, ArrowDown, Check } from "lucide-react";
 import { motion } from "motion/react";
 import { useAppContext } from "../context/AppContext";
-
-const socket = io();
 
 interface Config {
   type: "vless" | "vmess";
@@ -36,7 +33,12 @@ export default function Scanner() {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    socket.on(`latency-update-${scanId}`, (config: Config) => {
+    if (!scanId || !scanning) return;
+
+    const eventSource = new EventSource(`/api/events/${scanId}`);
+
+    eventSource.addEventListener(`latency-update-${scanId}`, (e: any) => {
+      const config = JSON.parse(e.data);
       setConfigs((prev) => {
         const index = prev.findIndex((c) => c.originalUri === config.originalUri);
         if (index !== -1) {
@@ -49,7 +51,8 @@ export default function Scanner() {
       setProgress((prev) => prev + 1);
     });
 
-    socket.on(`speed-update-${scanId}`, (config: Config) => {
+    eventSource.addEventListener(`speed-update-${scanId}`, (e: any) => {
+      const config = JSON.parse(e.data);
       setConfigs((prev) => {
         const index = prev.findIndex((c) => c.originalUri === config.originalUri);
         if (index !== -1) {
@@ -62,9 +65,9 @@ export default function Scanner() {
       setProgress((prev) => prev + 1);
     });
 
-    socket.on(`scan-complete-${scanId}`, (data: { type: string }) => {
+    eventSource.addEventListener(`scan-complete-${scanId}`, (e: any) => {
+      const data = JSON.parse(e.data);
       if (data.type === "latency") {
-        // Start speed test automatically for successful configs
         const successful = configs.filter((c) => c.latency && c.latency > 0);
         if (successful.length > 0) {
           fetch("/api/scan/speed", {
@@ -76,18 +79,18 @@ export default function Scanner() {
           setProgress(0);
         } else {
           setScanning(false);
+          eventSource.close();
         }
       } else if (data.type === "speed") {
         setScanning(false);
+        eventSource.close();
       }
     });
 
     return () => {
-      socket.off(`latency-update-${scanId}`);
-      socket.off(`speed-update-${scanId}`);
-      socket.off(`scan-complete-${scanId}`);
+      eventSource.close();
     };
-  }, [scanId, configs]);
+  }, [scanId, scanning, configs]);
 
   const startScan = async () => {
     if (!input.trim()) return;

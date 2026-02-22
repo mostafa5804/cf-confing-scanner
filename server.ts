@@ -1,7 +1,5 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import { createServer } from "http";
-import { Server } from "socket.io";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -11,35 +9,54 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function startServer() {
   const app = express();
-  const httpServer = createServer(app);
-  const io = new Server(httpServer, {
-    cors: {
-      origin: "*",
-      methods: ["GET", "POST"],
-    },
-  });
-
   const PORT = process.env.PORT || 3000;
 
   app.use(cors());
   app.use(express.json());
 
+  // SSE Connections Store
+  const clients = new Map<string, express.Response>();
+
+  app.get("/api/events/:id", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    const id = req.params.id;
+    clients.set(id, res);
+
+    req.on("close", () => {
+      clients.delete(id);
+    });
+  });
+
+  const broadcast = (id: string, event: string, data: any) => {
+    const client = clients.get(id);
+    if (client) {
+      client.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
   // API Routes
   app.post("/api/scan/latency", async (req, res) => {
     const { configs, id } = req.body;
-    scanLatency(configs, id, io);
+    const emitter = { emit: (event: string, data: any) => broadcast(id, event, data) };
+    scanLatency(configs, id, emitter as any);
     res.json({ status: "started", id });
   });
 
   app.post("/api/scan/speed", async (req, res) => {
     const { configs, id, rounds } = req.body;
-    scanSpeed(configs, id, rounds, io);
+    const emitter = { emit: (event: string, data: any) => broadcast(id, event, data) };
+    scanSpeed(configs, id, rounds, emitter as any);
     res.json({ status: "started", id });
   });
 
   app.post("/api/scan/clean", async (req, res) => {
     const { mode, id } = req.body;
-    scanCleanIPs(mode, id, io);
+    const emitter = { emit: (event: string, data: any) => broadcast(id, event, data) };
+    scanCleanIPs(mode, id, emitter as any);
     res.json({ status: "started", id });
   });
 
@@ -57,15 +74,14 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Serve static files in production
     app.use(express.static(path.join(__dirname, "dist")));
     app.get("*", (req, res) => {
       res.sendFile(path.join(__dirname, "dist", "index.html"));
     });
   }
 
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
