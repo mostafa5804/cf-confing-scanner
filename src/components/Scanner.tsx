@@ -92,25 +92,6 @@ export default function Scanner() {
   const startScan = async () => {
     if (!input.trim()) return;
     const lines = input.split("\n").filter((l) => l.trim());
-    const newConfigs = lines.map((l) => ({ originalUri: l.trim() } as Config)); // Simplified parsing on client
-    // Actually, backend parses. We send raw strings? No, backend expects Config objects?
-    // Wait, backend expects Config objects for latency scan.
-    // So frontend needs to parse or backend needs to parse raw strings.
-    // Let's make backend parse raw strings.
-    // Wait, `scanLatency` takes `Config[]`.
-    // So frontend should parse.
-    // Or I can add a `parse` endpoint.
-    // Let's implement simple parsing on frontend to display initial list.
-    
-    // For now, let's just send raw strings to a new endpoint `/api/parse`?
-    // No, let's parse on client. It's easy.
-    // I'll copy parse logic or just use a simple regex.
-    // Actually, let's just send raw strings and let backend parse and return initial list.
-    // But `scanLatency` expects `Config[]`.
-    // I'll update backend to accept strings and parse them.
-    
-    // Wait, let's stick to the plan. I'll implement `parseConfig` on frontend too.
-    // It's duplicated code but safer for now.
     
     const parsedConfigs = lines.map(line => {
         try {
@@ -155,11 +136,59 @@ export default function Scanner() {
     const id = Math.random().toString(36).substring(7);
     setScanId(id);
 
-    await fetch("/api/scan/latency", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ configs: parsedConfigs, id }),
-    });
+    try {
+      const response = await fetch("/api/scan/latency", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ configs: parsedConfigs, id }),
+      });
+      if (!response.ok) throw new Error("Backend unavailable");
+    } catch (e) {
+      console.warn("Backend not found, switching to Browser-side scanning (Limited)");
+      runBrowserScan(parsedConfigs);
+    }
+  };
+
+  const runBrowserScan = async (configsToScan: Config[]) => {
+    for (let i = 0; i < configsToScan.length; i++) {
+      if (!scanning) break;
+      const config = configsToScan[i];
+      
+      // Browser-side latency (Simulated via fetch to speed.cloudflare.com)
+      // Note: Real IP ping is not possible in browser due to SSL/CORS
+      const start = performance.now();
+      try {
+        await fetch(`https://speed.cloudflare.com/__down?bytes=0`, { mode: 'no-cors' });
+        const latency = performance.now() - start;
+        
+        // Speed test (Browser can do this because Cloudflare allows CORS)
+        const speedStart = performance.now();
+        const res = await fetch(`https://speed.cloudflare.com/__down?bytes=1048576`); // 1MB
+        const blob = await res.blob();
+        const duration = (performance.now() - speedStart) / 1000;
+        const speed = (blob.size / duration) / 1024 / 1024;
+
+        setConfigs(prev => {
+          const newConfigs = [...prev];
+          const idx = newConfigs.findIndex(c => c.originalUri === config.originalUri);
+          if (idx !== -1) {
+            newConfigs[idx] = { ...newConfigs[idx], latency, speed, status: 'success' };
+          }
+          return newConfigs;
+        });
+      } catch (err) {
+        setConfigs(prev => {
+          const newConfigs = [...prev];
+          const idx = newConfigs.findIndex(c => c.originalUri === config.originalUri);
+          if (idx !== -1) {
+            newConfigs[idx] = { ...newConfigs[idx], status: 'failed' };
+          }
+          return newConfigs;
+        });
+      }
+      setProgress(i + 1);
+    }
+    setScanning(false);
   };
 
   const stopScan = async () => {

@@ -52,11 +52,17 @@ export default function CleanIPScanner() {
     const id = Math.random().toString(36).substring(7);
     setScanId(id);
 
-    await fetch("/api/scan/clean", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode, id }),
-    });
+    try {
+      const response = await fetch("/api/scan/clean", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, id }),
+      });
+      if (!response.ok) throw new Error("Backend unavailable");
+    } catch (e) {
+      alert("این بخش نیاز به سرور دارد و در GitHub Pages کار نمی‌کند. لطفا از Vercel استفاده کنید.");
+      setScanning(false);
+    }
   };
 
   const stopScan = async () => {
